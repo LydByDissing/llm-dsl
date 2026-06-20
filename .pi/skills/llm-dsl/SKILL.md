@@ -5,7 +5,9 @@ description: >
   and bd (beads) issue tracker. Use when decomposing a task into parallel
   subagent work (code, review, test, etc.), collecting results, and generating
   summaries. The agent decomposes NL input into DSL task messages, creates bd
-  issues, monitors completion, and synthesizes results.
+  issues, monitors completion, and synthesizes results. Use for structured
+  multi-step workflows with file changes, test results, or findings. Do NOT
+  use for short messages, quick status updates, or simple questions.
 ---
 
 # LLM-DSL Skill
@@ -15,8 +17,29 @@ description: >
 Use this skill when:
 - The user asks you to do a task that benefits from parallel subagent work
 - You need to decompose a task into code + review + test
-- You want structured, machine-readable task/result messages
+- Messages contain structured data: file paths, line numbers, test results, findings
 - You want token-efficient inter-agent communication
+
+**Do NOT use** for:
+- Short messages (< 50 tokens of content) — bracket overhead exceeds savings
+- Quick status updates ("done", "working on it", "failed")
+- Simple questions or single-line responses
+- Iterative back-and-forth with tiny deltas
+
+**Rule of thumb:** If the message has structured data (files, line numbers,
+artifacts, test suites, findings), use DSL. If it's a short conversational
+message, use plain NL.
+
+## Benchmark
+
+DSL saves 25-49% tokens on structured tasks but costs ~24% more on short
+iterative messages. Breakeven is ~50 tokens of content.
+
+| Scenario | NL tokens | DSL tokens | Savings |
+|----------|-----------|------------|---------|
+| Single structured task | 135 | 69 | 49% |
+| 3-step pipeline | 346 | 235 | 32% |
+| Short iterative messages | 162 | 201 | -24% |
 
 ## Overview
 
@@ -28,6 +51,46 @@ for structured task/result messages:
 3. **Monitor** progress via `bd ready` / `bd mol progress`
 4. **Collect** results from completed issues
 5. **Summarize** work completed
+
+## DSL vs NL Decision
+
+In a multi-agent workflow, not every message needs DSL. Mix them:
+
+**Use DSL for:**
+- Task assignments with structured specs (files, rules, expected outputs)
+- Completion results with artifacts (files changed, tests run, findings)
+- Anything with file paths, line numbers, test counts, severity levels
+
+**Use plain NL for:**
+- Clarification questions ("Which file should I modify?")
+- Quick acknowledgments ("Got it, working on it")
+- Error descriptions that are a single sentence
+- Summary messages to the user
+
+**Example — mixed workflow:**
+
+```
+1. Main → Coder (DSL):
+   [task type=code][goal]Add input validation[/goal]
+   [file read=src/handlers/user.py]
+   [spec][field name=email required=true rule=format:email][/spec]
+   [/task]
+
+2. Coder → Main (NL):
+   "Done. Added validate_user_input() to src/validation/user_schema.py."
+
+3. Main → Reviewer (DSL):
+   [task type=review][goal]Review validation code[/goal]
+   [context-ref id=t1.artifacts][/task]
+
+4. Reviewer → Main (DSL):
+   [result status=complete][verdict approve]
+   [finding severity=minor path=src/handlers/user.py:34]Email regex issue[/finding]
+   [/result]
+
+5. Main → User (NL):
+   "All done. Code approved with one minor note about email regex."
+```
 
 ## Quick Start
 
