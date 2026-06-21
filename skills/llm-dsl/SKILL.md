@@ -38,59 +38,17 @@ The main agent handles Steps 1-5. Step 5 spawns a conductor-execute sub-agent (h
 
 ---
 
-## Step 1 — Understand
+## Steps 1-3 — Silent Planning
 
-Read the user's request and describe:
-- What problem is being solved
-- Where it sits in the project (which files, which layer, which agent role)
-- What currently exists that's relevant (read files if needed)
-- Any ambiguities that need resolving before planning
-
-Keep this to 3-5 sentences. Resolve ambiguities by asking — do not assume.
-
----
-
-## Step 2 — Scope
-
-State explicitly:
-
-**In scope:**
-- Bullet list of what will be changed or produced
-
-**Out of scope:**
-- Bullet list of adjacent things that will NOT be touched
-- Be specific: "will not refactor existing validation logic", "will not update tests outside src/validation/"
-
-This boundary is binding. Sub-agents must stay inside it.
-
----
-
-## Step 3 — Plan
-
-### Task decomposition
-
-Decide how many workers are needed:
-- **Single focused task** → one haiku sub-agent
-- **Multi-step / parallel** → decompose into coder + reviewer + tester (or subset)
-
-For each task, define:
-- Goal (one sentence)
-- Input files or prior task references
-- Expected output artifacts
-- **Acceptance criteria** (mandatory — one or more verifiable conditions)
-
-### Definition of Done (DoD)
-
-State what the overall workflow succeeds at — the integration-level check
-the main agent performs after all workers complete. Example:
-> "Email validation is implemented, passes all new tests, and reviewer approves with no critical findings."
-
+1. **Understand**: what problem, which files/layer, what exists, any ambiguities — ask before assuming
+2. **Scope**: explicit in/out bullet lists; boundary is binding on sub-agents
+3. **Plan**: decompose into coder/reviewer/tester; each task needs goal, inputs, artifacts, acceptance criteria; define DoD
 
 ---
 
 ## Step 4 — Confirm (hard gate)
 
-Present a summary of steps 1-3 to the user:
+Present steps 1-3 to the user:
 
 ```
 ## Understanding
@@ -113,9 +71,7 @@ Task 2 — <role>: <goal>
 Shall I proceed?
 ```
 
-**Stop here. Do not continue until the user replies with approval.**
-
-If the user requests changes, update the plan and confirm again before proceeding.
+**Stop. Do not continue until user approves. On changes, re-confirm before proceeding.**
 
 ---
 
@@ -123,51 +79,21 @@ If the user requests changes, update the plan and confirm again before proceedin
 
 Only reached after explicit user approval.
 
-### Setup
-
-```bash
-RUN_ID=$(python3 -c "import uuid; print(uuid.uuid4().hex[:8])")
-```
-
 ### Create bd issues
 
 ```bash
-BD_CODER=$(bd create "Implement: Add email validation" --silent \
-  --labels "agent=coder,run=$RUN_ID" \
-  --acceptance "validate_email() exists in src/validation/email.py" \
-  --acceptance "rejects malformed addresses, accepts valid ones" \
-  --body-file - << 'DSL'
-[task id=t1 type=code]
-[goal]Add email validation to signup[/goal]
-[out src/validation/email.py]
+RUN_ID=$(python3 -c "import uuid; print(uuid.uuid4().hex[:8])")
+BD_ROLE=$(bd create "Action: title" --silent \
+  --labels "agent=role,run=$RUN_ID" \
+  --acceptance "criterion" \
+  --body-file - << DSL_END
+[task id=t1 type=code|review|test]
+[goal]objective[/goal]
+[out path]
 [/task]
-DSL
+DSL_END
 )
-
-BD_REVIEWER=$(bd create "Review: email validation" --silent \
-  --labels "agent=reviewer,run=$RUN_ID" \
-  --deps "$BD_CODER" \
-  --acceptance "no critical or major findings" \
-  --body-file - << 'DSL'
-[task id=t2 type=review]
-[goal]Review email validation for correctness and security[/goal]
-[ref t1.artifacts]
-[/task]
-DSL
-)
-
-BD_TESTER=$(bd create "Test: email validation" --silent \
-  --labels "agent=tester,run=$RUN_ID" \
-  --deps "$BD_CODER" \
-  --acceptance "all tests pass" \
-  --acceptance "edge cases covered: empty, malformed, unicode" \
-  --body-file - << 'DSL'
-[task id=t3 type=test]
-[goal]Write and run tests for email validation[/goal]
-[ref t1.artifacts]
-[/task]
-DSL
-)
+# For reviewer/tester add: --deps "$BD_PRIOR"
 ```
 
 ### Spawn conductor-execute
@@ -190,63 +116,9 @@ Agent(model="haiku", description="Conductor-execute",
 
 ### Conductor-execute prompt template
 
-```
-You are a conductor-execute sub-agent. Run a pre-planned set of bd tasks in dependency order.
+Conductor-execute prompt: read $CLAUDE_PLUGIN_ROOT/skills/llm-dsl/prompts/conductor-execute.md
 
-Project directory: <CLAUDE_PROJECT_DIR>
-All file reads and writes must be inside this directory.
-Run all shell commands from this directory.
-
-Your exec block:
-<EXEC_BLOCK>
-
-Instructions:
-1. Parse the [exec] block to get the list of [job] entries.
-2. Spawn workers in dependency order:
-   - Jobs with no depends: spawn in parallel (run_in_background=True)
-   - Jobs with depends: wait for dependency to complete first (run_in_background=False)
-   - Use the model specified in model= attribute
-   - Use the worker sub-agent prompt template below for each job
-3. After all workers complete, collect results:
-   bd show <id> for each job
-4. Return synthesis DSL:
-   [synthesis run=<run_id> s=ok|partial|fail]
-   [job id=<id> role=<role> s=ok|fail]
-   [/synthesis]
-
-Worker sub-agent prompt template:
----
-You are a <role> sub-agent. Your task is in bd issue <bd_id>.
-
-Project directory: <CLAUDE_PROJECT_DIR>
-All file reads and writes must be inside this directory.
-Run all shell commands from this directory.
-
-1. Read your task and acceptance criteria:
-   bd show <bd_id>
-
-2. Do the work described in [goal], staying within the scope of this issue only.
-
-3. Verify your work meets every acceptance criterion before writing the result.
-
-4. Write result:
-   bd update <bd_id> --body-file - << 'DSL'
-   [result id=<task_id> s=ok|partial|fail|blocked]
-   [artifact path=<path> a=new|mod|del n=<lines>]
-   [suite t=<N> p=<N> f=<N>]
-   [verdict approve|request-changes|block]
-   [note sev=crit|major|minor|info at=<file>:<line>]<text>[/note]
-   [/result]
-   DSL
-
-5. Close: bd close <bd_id>
-
-Rules:
-- Do NOT create additional bd issues
-- Do NOT touch files outside your task scope
-- If you cannot meet any acceptance criterion: write s=blocked, explain why
----
-```
+Worker prompt template: read $CLAUDE_PLUGIN_ROOT/skills/llm-dsl/prompts/worker.md
 
 ### Crash recovery
 
@@ -259,20 +131,7 @@ bd list --label "run=$RUN_ID" --status open   # find stalled issues
 
 ## Step 6 — Synthesize
 
-After conductor-execute returns the synthesis DSL, the main agent:
-
-1. Parses the synthesis block to check job statuses
-2. Reads each job's bd issue to collect detailed results
-3. Checks against the Definition of Done:
-   - Did all acceptance criteria pass?
-   - Any critical/major findings from reviewer?
-   - Any test failures?
-4. Reports to user in plain NL:
-   - What was done (files changed, functions added)
-   - Test results (pass/fail counts)
-   - Review verdict and any findings
-   - Whether the DoD was met
-   - Any action items if DoD was not met
+Read synthesis DSL from conductor-execute. Check each job's bd issue. Verify DoD: all acceptance criteria pass, no critical/major reviewer findings, no test failures. Report to user: files changed, test counts, review verdict, DoD met/unmet, action items.
 
 ---
 
@@ -399,17 +258,3 @@ bd dep add <child> --depends-on <parent>
 bd close <id>
 ```
 
-## Developer Scripts
-
-These scripts live in `skills/llm-dsl/scripts/` and are useful for local development and debugging. They are not called by the conductor during normal skill execution.
-
-```bash
-# Parse DSL → JSON (debugging)
-bd show <id> | python3 skills/llm-dsl/scripts/dsl_parse.py --pretty
-
-# Validate DSL syntax
-python3 skills/llm-dsl/scripts/dsl_validate.py --file task.txt
-
-# Collect all results in a molecule
-python3 skills/llm-dsl/scripts/bd_collect.py --mol-id <mol_id> --pretty
-```
