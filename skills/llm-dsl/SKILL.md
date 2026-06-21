@@ -42,7 +42,10 @@ The main agent handles Steps 1-5. Step 5 spawns a conductor-execute sub-agent (h
 
 1. **Understand**: what problem, which files/layer, what exists, any ambiguities — ask before assuming
 2. **Scope**: explicit in/out bullet lists; boundary is binding on sub-agents
-3. **Plan**: decompose into coder/reviewer/tester; each task needs goal, inputs, artifacts, acceptance criteria; define DoD
+3. **Plan**: decompose into coder/reviewer/tester; each task needs goal, inputs, artifacts, acceptance criteria, and a **REQ id**; define DoD
+   - For each task identify which requirement (REQ-XXX) it implements
+   - If no REQ can be identified, mark the task as an orphan — flag it explicitly in Step 4
+   - Orphan tasks are a warning: they may be gold-plating or indicate a missing requirement
 
 ---
 
@@ -60,10 +63,16 @@ Out: ...
 
 ## Plan
 Task 1 — <role>: <goal>
+  REQ: REQ-XXX
   Acceptance: <criteria>
 Task 2 — <role>: <goal>
+  REQ: REQ-XXX
   Acceptance: <criteria>
 ...
+
+## Orphan Tasks (no REQ)
+- Task N: <title> — <reason no requirement could be identified>
+(omit section if none)
 
 ## Definition of Done
 <sentence>
@@ -81,13 +90,16 @@ Only reached after explicit user approval.
 
 ### Create bd issues
 
+Every task MUST carry a `req=` label matching the REQ id identified in Step 3. Omit only for tasks explicitly marked orphan in Step 4 — and even then add `req=orphan` so the query returns them.
+
 ```bash
 RUN_ID=$(python3 -c "import uuid; print(uuid.uuid4().hex[:8])")
 BD_ROLE=$(bd create "Action: title" --silent \
-  --labels "agent=role,run=$RUN_ID" \
+  --labels "agent=role,run=$RUN_ID,req=REQ-XXX" \
   --acceptance "criterion" \
   --body-file - << DSL_END
 [task id=t1 type=code|review|test]
+[req id=REQ-XXX]
 [goal]objective[/goal]
 [out path]
 [/task]
@@ -132,6 +144,30 @@ bd list --label "run=$RUN_ID" --status open   # find stalled issues
 ## Step 6 — Synthesize
 
 Read synthesis DSL from conductor-execute. Check each job's bd issue. Verify DoD: all acceptance criteria pass, no critical/major reviewer findings, no test failures. Report to user: files changed, test counts, review verdict, DoD met/unmet, action items.
+
+### REQ Status Rollup
+
+After individual task results, emit a REQ coverage table. Query tasks for the run:
+
+```bash
+bd list --label "run=$RUN_ID"
+```
+
+Group by `req=` label. For each REQ:
+- **done** — all tasks closed with `s=ok`
+- **partial** — some tasks closed, some still open or `s=fail`
+- **fail** — at least one task `s=fail` or blocked
+- **⚠ orphan** — tasks with `req=orphan` label
+
+```
+## REQ Coverage
+REQ-XXX: done (3/3 tasks, all passing)
+REQ-YYY: partial (1/2 tasks done, 1 failing)
+REQ-ZZZ: fail (blocked — see task BD-42)
+⚠ Orphan tasks: BD-17 (no requirement linked)
+```
+
+Flag any REQs from the original scope that have zero tasks (unimplemented).
 
 ---
 
@@ -193,6 +229,7 @@ Sub-agents generating code MUST follow these rules. No exceptions.
 
 ```
 [task id=<id> type=code|review|test]
+[req id=<req-id>]            # requirement being implemented (required)
 [goal]<objective>[/goal]
 [file read=<path>]           # file to read (multiple allowed)
 [spec]...[/spec]             # structured constraints
@@ -230,6 +267,7 @@ Sub-agents generating code MUST follow these rules. No exceptions.
 ```
 [synthesis run=<run_id> s=ok|partial|fail]
 [job id=<bd_id> role=<role> s=ok|fail]
+[req id=<req-id> s=done|partial|fail tasks=<closed>/<total>]
 [/synthesis]
 ```
 

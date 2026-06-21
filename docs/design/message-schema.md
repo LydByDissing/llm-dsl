@@ -101,6 +101,7 @@ These types are always available and do not need declaration.
 
 | Tag | Type | Description |
 |-----|------|-------------|
+| `[req]` | req ref | Requirement being implemented (required) |
 | `[goal]` | text (str) | What to achieve, in NL |
 | `[file]` | file ref | File to read/modify |
 | `[spec]` | structured | Structured specification |
@@ -165,7 +166,22 @@ These types are always available and do not need declaration.
 
 The consumer resolves this reference and loads the referenced data into working context before processing the task. The data is **not** serialized into the message.
 
-### 3.5 `[file]` — File to read
+### 3.5 `[req]` — Requirement reference
+
+```
+[req id=<req-id>]
+```
+
+Links the task to the requirement it implements. Required on every `[task]`. Use `id=orphan` when no requirement can be identified — this triggers orphan reporting in the synthesis step.
+
+**Attributes:**
+| Attr | Type | Required | Description |
+|------|------|----------|-------------|
+| `id` | `str` | yes | Requirement ID (e.g. `REQ-42`), or `orphan` |
+
+The `req=` label on the bd issue mirrors this field and enables `bd list --label req=REQ-42` queries for REQ status rollup.
+
+### 3.6 `[file]` — File to read
 
 ```
 [file read=<path>]content[/file]
@@ -174,7 +190,7 @@ The consumer resolves this reference and loads the referenced data into working 
 
 With inline content or just a reference. The consumer can choose to inline or reference based on size.
 
-### 3.6 `[added]` / `[removed]` — Structural change record
+### 3.7 `[added]` / `[removed]` — Structural change record
 
 ```
 [added fn=<name> in:<type> out:<type>]

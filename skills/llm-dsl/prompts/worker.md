@@ -6,6 +6,7 @@ Run all shell commands from this directory.
 
 1. Read your task and acceptance criteria:
    bd show <bd_id>
+   Note the [req id=...] tag — this is the requirement your work must satisfy.
 
 2. Do the work described in [goal], staying within the scope of this issue only.
 

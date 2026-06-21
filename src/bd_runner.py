@@ -137,6 +137,7 @@ class BdTask:
     agent_type: str
     body: str = ""
     status: str = "open"
+    req: str = None
 
 
 class BdPipelineRunner:
@@ -153,10 +154,13 @@ class BdPipelineRunner:
     def create_task(self, task_id: str, agent_type: str, body: str,
                     labels: list[str] = None,
                     acceptance: list[str] = None,
-                    deps: list[str] = None) -> str:
+                    deps: list[str] = None,
+                    req: str = None) -> str:
         """Create a task issue. Returns bd issue ID."""
         title = self._extract_title(body, task_id)
         all_labels = [f"agent={agent_type}"]
+        if req:
+            all_labels.append(f"req={req}")
         if labels:
             all_labels.extend(labels)
 
@@ -240,6 +244,45 @@ class BdPipelineRunner:
     def collect_results(self, bd_ids: list[str]) -> list[dict]:
         """Collect parsed results from multiple issues."""
         return [self.get_result(bid) for bid in bd_ids]
+
+    def req_status(self, run_id: str) -> dict[str, list[dict]]:
+        """Group issues for a run by their req= label.
+
+        Returns dict keyed by req id (or '__orphan__' when missing).
+        Each value is a list of issue dicts from bd list.
+        """
+        issues = bd_list(label=f"run={run_id}")
+        by_req: dict[str, list[dict]] = {}
+        for issue in issues:
+            labels = issue.get("labels", [])
+            req = next((l.split("=", 1)[1] for l in labels if l.startswith("req=")), None)
+            key = req if req and req != "orphan" else "__orphan__"
+            by_req.setdefault(key, []).append(issue)
+        return by_req
+
+    def req_rollup(self, run_id: str) -> list[dict]:
+        """Return per-REQ rollup for the synthesis report.
+
+        Each entry: {req, total, closed, status}
+        status: 'done' | 'partial' | 'fail' | 'orphan'
+        """
+        by_req = self.req_status(run_id)
+        rows = []
+        for req, issues in by_req.items():
+            total = len(issues)
+            closed = sum(1 for i in issues if i.get("status") in ("closed", "done"))
+            has_fail = any(i.get("status") in ("failed", "blocked") for i in issues)
+            if req == "__orphan__":
+                status = "orphan"
+            elif has_fail:
+                status = "fail"
+            elif closed == total:
+                status = "done"
+            else:
+                status = "partial"
+            rows.append({"req": req, "total": total, "closed": closed, "status": status,
+                         "issues": [i.get("id") for i in issues]})
+        return rows
 
     def create_summary(self, title: str, summary_body: str) -> str:
         """Create a summary issue. Returns bd issue ID."""

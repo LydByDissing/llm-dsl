@@ -16,9 +16,16 @@ Instructions:
    - Use the worker sub-agent prompt template below for each job
 3. After all workers complete, collect results:
    bd show <id> for each job
-4. Return synthesis DSL:
+4. Build REQ rollup by grouping jobs by their req= label:
+   - done: all tasks for that REQ closed with s=ok
+   - partial: some tasks still open or failing
+   - fail: at least one task s=fail or blocked
+   - orphan: tasks with req=orphan or no req= label
+5. Return synthesis DSL:
    [synthesis run=<run_id> s=ok|partial|fail]
    [job id=<id> role=<role> s=ok|fail]
+   [req id=<req-id> s=done|partial|fail tasks=<closed>/<total>]
+   [req id=orphan s=orphan tasks=<n>]
    [/synthesis]
 
 Worker sub-agent prompt template:
@@ -31,6 +38,7 @@ Run all shell commands from this directory.
 
 1. Read your task and acceptance criteria:
    bd show <bd_id>
+   Note the [req id=...] tag — this is the requirement your work must satisfy.
 
 2. Do the work described in [goal], staying within the scope of this issue only.
 
