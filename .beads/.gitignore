@@ -5,6 +5,12 @@
 *.db-wal
 *.db-shm
 
+# Embedded Dolt database — local-only derived cache. Git is the source of
+# truth (issues.jsonl); dolt is not shared across clones.
+embeddeddolt/
+# Dolt backup artifacts — local-only.
+backup/
+
 # Daemon runtime files
 daemon.lock
 daemon.log
